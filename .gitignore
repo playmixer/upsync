@@ -1,0 +1,4 @@
+data.*.json
+temp
+logs
+.env
