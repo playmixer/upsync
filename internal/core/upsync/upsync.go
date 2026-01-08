@@ -71,7 +71,7 @@ func (u *UpSync) Sync(ctx context.Context) error {
 			}()
 			err = u.syncDo(ctx, item)
 			if err != nil {
-				u.log.Error("failed sync", zap.Error(err))
+				u.log.Error("failed sync", zap.String("name", item.Title), zap.Error(err))
 				continue
 			}
 
@@ -119,7 +119,7 @@ func (u *UpSync) syncDo(ctx context.Context, item *models.SyncItem) error {
 	if err != nil {
 		return fmt.Errorf("failed getting store list: %w", err)
 	}
-	u.log.Info("store count files", zap.Int("count", len(storeList)))
+	u.log.Info("store count files", zap.String("name", item.Title), zap.Int("count", len(storeList)))
 	mStoreList := make(map[string]*models.File)
 	for _, f := range storeList {
 		mStoreList[f.Name] = f
@@ -129,7 +129,7 @@ func (u *UpSync) syncDo(ctx context.Context, item *models.SyncItem) error {
 	if err != nil {
 		return fmt.Errorf("failed getting list: %w", err)
 	}
-	u.log.Info("remote count files", zap.Int("count", len(remoteList)))
+	u.log.Info("remote count files", zap.String("name", item.Title), zap.Int("count", len(remoteList)))
 
 	genFilePath := func(ctx context.Context) <-chan string {
 		c := make(chan string, 100)
