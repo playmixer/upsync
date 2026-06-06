@@ -1,5 +1,5 @@
 package upsync
 
 type Config struct {
-	WorkerPoolCount int `env:"UPSYNC_WOKRER_COUNT" envDefault:"1"`
+	WorkerPoolCount int `env:"UPSYNC_WORKER_COUNT" envDefault:"1"`
 }

@@ -50,7 +50,7 @@ func NewRemote(typeLoader models.TProtocol, cfg Config, log *zap.Logger) (upload
 			Extensions: cfg.Extensions,
 		}, log)
 		if err != nil {
-			return nil, fmt.Errorf("failed initialize direcory loader: %w", err)
+			return nil, fmt.Errorf("failed initialize directory loader: %w", err)
 		}
 		return d, nil
 	}
@@ -68,7 +68,7 @@ func NewSyncStore(typeLoader models.TProtocol, cfg Config, log *zap.Logger) (loa
 			Path:    cfg.Path,
 		}, log)
 		if err != nil {
-			return nil, fmt.Errorf("failed initialize ftploader: %w", err)
+			return nil, fmt.Errorf("failed initialize immich: %w", err)
 		}
 		return u, nil
 	}

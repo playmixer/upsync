@@ -22,18 +22,22 @@ type UpSync struct {
 	log     *zap.Logger
 	wC      chan func() error
 	wg      *sync.WaitGroup
-	tempFir string
+	tempDir string
 	done    chan struct{}
 	cfg     Config
 }
 
 func New(ctx context.Context, cfg Config, store Store, log *zap.Logger) (*UpSync, error) {
+	if cfg.WorkerPoolCount < 1 {
+		cfg.WorkerPoolCount = 1
+	}
+
 	u := &UpSync{
 		store:   store,
 		log:     log,
 		wC:      make(chan func() error, 10),
 		wg:      &sync.WaitGroup{},
-		tempFir: "./temp",
+		tempDir: "./temp",
 		done:    make(chan struct{}),
 		cfg:     cfg,
 	}
@@ -42,7 +46,7 @@ func New(ctx context.Context, cfg Config, store Store, log *zap.Logger) (*UpSync
 		go u.worker(ctx, i)
 	}
 
-	_ = os.Mkdir(u.tempFir, os.ModePerm)
+	_ = os.Mkdir(u.tempDir, os.ModePerm)
 
 	return u, nil
 }
@@ -50,12 +54,14 @@ func New(ctx context.Context, cfg Config, store Store, log *zap.Logger) (*UpSync
 func (u *UpSync) Sync(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	var err error
+
 	synces, err := u.store.GetSynces()
 	if err != nil {
 		return fmt.Errorf("failed getting remotes: %w", err)
 	}
 
+	u.log.Info("sync started", zap.Int("tasks_count", len(synces)))
+	var successCount, errorCount int
 	for _, item := range synces {
 		select {
 		case <-ctx.Done():
@@ -63,20 +69,22 @@ func (u *UpSync) Sync(ctx context.Context) error {
 			return nil
 		default:
 			u.log.Info("starting sync", zap.String("name", item.Title))
-			defer u.log.Info("stop sync", zap.String("name", item.Title))
-			defer func() {
-				if r := recover(); r != nil {
-					u.log.Error("Recovered in main:", zap.Any("recover", r))
-				}
-			}()
 			err = u.syncDo(ctx, item)
 			if err != nil {
 				u.log.Error("failed sync", zap.String("name", item.Title), zap.Error(err))
-				continue
+				errorCount++
+			} else {
+				successCount++
 			}
-
+			u.log.Info("stop sync", zap.String("name", item.Title))
 		}
 	}
+
+	u.log.Info("sync finished",
+		zap.Int("total", len(synces)),
+		zap.Int("success", successCount),
+		zap.Int("errors", errorCount),
+	)
 
 	return nil
 }
@@ -97,8 +105,7 @@ func (u *UpSync) syncDo(ctx context.Context, item *models.SyncItem) error {
 		u.log,
 	)
 	if err != nil {
-		u.log.Error("failed initialize remote store", zap.Error(err))
-		return nil
+		return fmt.Errorf("failed initialize remote store: %w", err)
 	}
 	defer upl.Close()
 
@@ -173,15 +180,16 @@ loopGenFilePath:
 			}
 
 			filename := filepath.Base(p)
-			f, err := os.Create(path.Join("./temp", filename))
+			f, err := os.Create(path.Join(u.tempDir, filename))
 			if err != nil {
 				return fmt.Errorf("failed create file: %w", err)
 			}
 			_, err = f.Write(*bFile)
 			if err != nil {
+				f.Close()
 				return fmt.Errorf("failed write file: %w", err)
 			}
-			u.log.Debug("upload temp file complite", zap.String("name", filename))
+			u.log.Debug("upload temp file complete", zap.String("name", filename))
 
 			type fR func() error
 			u.wC <- func(f *os.File, fname string) fR {
@@ -199,7 +207,7 @@ loopGenFilePath:
 					if err != nil {
 						return fmt.Errorf("failed write file: %w", err)
 					}
-					u.log.Info("upload file complite", zap.String("file", _fname))
+					u.log.Info("upload file complete", zap.String("file", _fname))
 
 					return nil
 				}
@@ -227,10 +235,10 @@ workerLoop:
 		case f := <-u.wC:
 			if f != nil {
 				if err := f(); err != nil {
-					u.log.Error("failed complite work", zap.Error(err))
+					u.log.Error("failed complete work", zap.Error(err))
 				}
 			}
-			u.log.Debug("work func complite", zap.Int("id", idx))
+			u.log.Debug("work func complete", zap.Int("id", idx))
 		}
 	}
 	u.log.Info("stopped worker", zap.Int("id", idx))
@@ -238,9 +246,12 @@ workerLoop:
 
 func (u *UpSync) Close() {
 	u.log.Info("close upsync ...")
-	close(u.wC)
-	u.log.Info("stopping upsync ...")
 	close(u.done)
 	u.log.Info("wait stopping all workers ...")
 	u.wg.Wait()
+	close(u.wC)
+	u.log.Info("cleanup temp directory ...")
+	if err := os.RemoveAll(u.tempDir); err != nil {
+		u.log.Error("failed remove temp directory", zap.String("path", u.tempDir), zap.Error(err))
+	}
 }

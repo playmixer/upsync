@@ -16,9 +16,14 @@ import (
 )
 
 const (
-	handleAssetsDevice string = "%s/api/assets/device/%s" //получить список файлов ...
-	handleAssets       string = "%s/api/assets"           //получить список файлов ...
+	handleAssetsDevice string = "%s/api/assets/device/%s"
+	handleAssets       string = "%s/api/assets"
+	httpTimeout               = 30 * time.Second
 )
+
+var httpClient = &http.Client{
+	Timeout: httpTimeout,
+}
 
 type Immich struct {
 	cfg Config
@@ -44,7 +49,7 @@ func (i *Immich) ListStore() ([]*models.File, error) {
 	}
 	resp.Header.Add("x-api-key", i.cfg.APIKey)
 
-	response, err := http.DefaultClient.Do(resp)
+	response, err := httpClient.Do(resp)
 	if err != nil {
 		return nil, fmt.Errorf("failed do response: %w", err)
 	}
@@ -53,6 +58,10 @@ func (i *Immich) ListStore() ([]*models.File, error) {
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed read body: %w", err)
+	}
+
+	if response.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d, body: %s", response.StatusCode, string(body))
 	}
 
 	sFiles := []string{}
@@ -74,15 +83,7 @@ func (i *Immich) ListStore() ([]*models.File, error) {
 }
 
 func (i *Immich) Write(f *os.File, name string) error {
-	f, err := os.Open(f.Name())
-	if err != nil {
-		return fmt.Errorf("failed open temp file: %w", err)
-	}
-	defer f.Close()
-	// _, err = f.Write(*data)
-	// if err != nil {
-	// 	return fmt.Errorf("failed write temp file: %w", err)
-	// }
+	f.Seek(0, 0)
 
 	fInfo, err := f.Stat()
 	if err != nil {
@@ -131,7 +132,7 @@ func (i *Immich) Write(f *os.File, name string) error {
 	resp.Header.Add("x-api-key", i.cfg.APIKey)
 	resp.Header.Add("Content-Type", w.FormDataContentType())
 
-	response, err := http.DefaultClient.Do(resp)
+	response, err := httpClient.Do(resp)
 	if err != nil {
 		return fmt.Errorf("failed do response: %w", err)
 	}
@@ -152,8 +153,7 @@ func (i *Immich) Write(f *os.File, name string) error {
 		return nil
 	}
 
-	i.log.Debug("faile store file", zap.String("response", string(body)))
-	return nil
+	return fmt.Errorf("failed store file: status=%d, body=%s", response.StatusCode, string(body))
 }
 
 func (i *Immich) Close() error {

@@ -47,7 +47,10 @@ func (d *Directory) List(p string) ([]*models.File, error) {
 		}
 		fExtension := strings.ReplaceAll(filepath.Ext(e.Name()), ".", "")
 		if len(d.Ext) == 0 || slices.Contains(d.Ext, fExtension) {
-			info, _ := e.Info()
+			info, err := e.Info()
+			if err != nil {
+				return nil, fmt.Errorf("failed get file info `%s`: %w", e.Name(), err)
+			}
 			fileInfo := &models.File{
 				Name:  e.Name(),
 				IsDir: e.IsDir(),
@@ -69,6 +72,7 @@ func (d *Directory) Read(filepath string) (*[]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed open file: %w", err)
 	}
+	defer f.Close()
 	b, err := io.ReadAll(f)
 	if err != nil {
 		return nil, fmt.Errorf("failed read file: %w", err)
