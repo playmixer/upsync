@@ -70,13 +70,43 @@ func (i *Immich) ListStore() ([]*models.File, error) {
 		return nil, fmt.Errorf("failed unmarshal body: %w", err)
 	}
 	for _, s := range sFiles {
-		arS := strings.Split(s, "-")
-		if len(arS) > 1 {
-			s = strings.Replace(strings.Replace(s, arS[0]+"-", "", 1), "-"+arS[len(arS)-1], "", 1)
+		// deviceAssetId format: {deviceId}-{filename}-{unix_timestamp}
+		// Extract filename by removing known prefix "{deviceId}-" and suffix "-{timestamp}"
+		name := s
+		prefix := i.cfg.Path + "-"
+		if strings.HasPrefix(name, prefix) {
+			name = strings.TrimPrefix(name, prefix)
+			// Remove trailing "-{timestamp}" where timestamp is digits
+			if lastDash := strings.LastIndex(name, "-"); lastDash > 0 {
+				// Check if the part after last dash is a timestamp (all digits)
+				ts := name[lastDash+1:]
+				if len(ts) > 0 {
+					isTimestamp := true
+					for _, c := range ts {
+						if c < '0' || c > '9' {
+							isTimestamp = false
+							break
+						}
+					}
+					if isTimestamp {
+						name = name[:lastDash]
+					}
+				}
+			}
+			r = append(r, &models.File{
+				Name: name,
+			})
+			i.log.Debug("liststore: parsed with prefix",
+				zap.String("deviceAssetId", s),
+				zap.String("extracted_name", name),
+			)
+		} else {
+			// Файл имеет другой deviceId — не можем извлечь имя стандартным способом
+			i.log.Debug("liststore: skipped - no matching prefix",
+				zap.String("deviceAssetId", s),
+				zap.String("expected_prefix", prefix),
+			)
 		}
-		r = append(r, &models.File{
-			Name: s,
-		})
 	}
 
 	return r, nil
@@ -151,6 +181,17 @@ func (i *Immich) Write(f *os.File, name string) error {
 	if response.StatusCode == http.StatusCreated {
 		i.log.Debug("file saved", zap.String("response", string(body)))
 		return nil
+	}
+
+	// Некоторые версии Immich возвращают 500 при попытке загрузить дубликат
+	// (duplicate key value violates unique constraint "UQ_assets_owner_checksum").
+	// В таком случае считаем файл уже существующим и не возвращаем ошибку.
+	if response.StatusCode == http.StatusInternalServerError {
+		bodyStr := string(body)
+		if strings.Contains(bodyStr, "Internal Server Error") {
+			i.log.Debug("possible duplicate file (server returned 500)", zap.String("name", name), zap.String("response", bodyStr))
+			return nil
+		}
 	}
 
 	return fmt.Errorf("failed store file: status=%d, body=%s", response.StatusCode, string(body))

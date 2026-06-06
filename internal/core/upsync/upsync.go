@@ -131,6 +131,13 @@ func (u *UpSync) syncDo(ctx context.Context, item *models.SyncItem) error {
 	for _, f := range storeList {
 		mStoreList[f.Name] = f
 	}
+	u.log.Debug("store list map", zap.Any("mStoreList_keys", func() []string {
+		keys := make([]string, 0, len(mStoreList))
+		for k := range mStoreList {
+			keys = append(keys, k)
+		}
+		return keys
+	}()))
 
 	remoteList, err := upl.List(item.Remote.Path)
 	if err != nil {
